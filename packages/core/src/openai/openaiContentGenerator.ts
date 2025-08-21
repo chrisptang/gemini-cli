@@ -341,35 +341,67 @@ export class OpenAIContentGenerator implements ContentGenerator {
 
     const parts: Part[] = [];
     
+    // Handle text content first
     if (choice.message.content) {
       parts.push({ text: choice.message.content });
     }
 
-    // Handle function/tool calls
-    if (choice.message.tool_calls) {
+    // Handle function/tool calls with improved error handling
+    if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
       for (const toolCall of choice.message.tool_calls) {
+        try {
+          const args = toolCall.function.arguments ? JSON.parse(toolCall.function.arguments) : {};
+          parts.push({
+            functionCall: {
+              id: toolCall.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              name: toolCall.function.name,
+              args,
+            },
+          });
+        } catch (e) {
+          console.warn('Failed to parse function call arguments:', toolCall.function.arguments);
+          // Still create the function call with empty args if JSON parsing fails
+          parts.push({
+            functionCall: {
+              id: toolCall.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              name: toolCall.function.name,
+              args: {},
+            },
+          });
+        }
+      }
+    } else if (choice.message.function_call) {
+      // Handle legacy function_call format
+      try {
+        const args = choice.message.function_call.arguments ? JSON.parse(choice.message.function_call.arguments) : {};
         parts.push({
           functionCall: {
-            id: toolCall.id,
-            name: toolCall.function.name,
-            args: JSON.parse(toolCall.function.arguments || '{}'),
+            id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            name: choice.message.function_call.name,
+            args,
+          },
+        });
+      } catch (e) {
+        console.warn('Failed to parse legacy function call arguments:', choice.message.function_call.arguments);
+        parts.push({
+          functionCall: {
+            id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            name: choice.message.function_call.name,
+            args: {},
           },
         });
       }
-    } else if (choice.message.function_call) {
-      parts.push({
-        functionCall: {
-          id: 'call_' + Date.now(),
-          name: choice.message.function_call.name,
-          args: JSON.parse(choice.message.function_call.arguments || '{}'),
-        },
-      });
     }
 
     const content: Content = {
       role: 'model',
       parts,
     };
+
+    // Extract function calls for the functionCalls property
+    const functionCalls = parts
+      .filter(part => part.functionCall)
+      .map(part => part.functionCall!);
 
     return {
       candidates: [{
@@ -384,7 +416,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
       } : undefined,
       text: undefined,
       data: undefined,
-      functionCalls: undefined,
+      functionCalls: functionCalls.length > 0 ? functionCalls : undefined,
       executableCode: undefined,
       codeExecutionResult: undefined,
     };
@@ -393,6 +425,7 @@ export class OpenAIContentGenerator implements ContentGenerator {
   private async *convertFromOpenAIStream(stream: AsyncIterable<OpenAIStreamChunk>): AsyncGenerator<GenerateContentResponse> {
     let currentFunctionCall: Partial<FunctionCall> & { arguments?: string } = {};
     let currentToolCalls: Array<{ index: number; call: Partial<FunctionCall> & { arguments?: string } }> = [];
+    let hasActiveToolCalls = false;
     
     for await (const chunk of stream) {
       const choice = chunk.choices[0];
@@ -407,42 +440,21 @@ export class OpenAIContentGenerator implements ContentGenerator {
 
       // Handle function calls (legacy format)
       if (choice.delta.function_call) {
+        hasActiveToolCalls = true;
         if (choice.delta.function_call.name) {
           currentFunctionCall.name = choice.delta.function_call.name;
+          currentFunctionCall.id = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         }
         if (choice.delta.function_call.arguments) {
-          currentFunctionCall.args = currentFunctionCall.args || {};
           // Accumulate arguments (they might come in chunks)
           const argString = (currentFunctionCall.arguments || '') + choice.delta.function_call.arguments;
           currentFunctionCall.arguments = argString;
-        }
-        
-        // If this is the end of the function call, add it to parts
-        if (choice.finish_reason === 'function_call') {
-          try {
-            const args = JSON.parse(currentFunctionCall.arguments || '{}');
-            parts.push({
-              functionCall: {
-                id: 'call_' + Date.now(),
-                name: currentFunctionCall.name || '',
-                args,
-              },
-            });
-          } catch (e) {
-            // If JSON parsing fails, just use empty args
-            parts.push({
-              functionCall: {
-                id: 'call_' + Date.now(),
-                name: currentFunctionCall.name || '',
-                args: {},
-              },
-            });
-          }
         }
       }
 
       // Handle tool calls (new format)
       if (choice.delta.tool_calls) {
+        hasActiveToolCalls = true;
         for (const toolCallDelta of choice.delta.tool_calls) {
           const index = toolCallDelta.index;
           let currentToolCall = currentToolCalls.find(tc => tc.index === index);
@@ -465,37 +477,80 @@ export class OpenAIContentGenerator implements ContentGenerator {
             currentToolCall.call.arguments = currentArgs + toolCallDelta.function.arguments;
           }
         }
+      }
+
+      // Check if this is the end of function/tool calls and finalize them
+      if (hasActiveToolCalls && (choice.finish_reason === 'function_call' || choice.finish_reason === 'tool_calls' || !choice.delta.function_call && !choice.delta.tool_calls)) {
+        // Finalize legacy function calls
+        if (currentFunctionCall.name) {
+          try {
+            const args = currentFunctionCall.arguments ? JSON.parse(currentFunctionCall.arguments) : {};
+            parts.push({
+              functionCall: {
+                id: currentFunctionCall.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                name: currentFunctionCall.name,
+                args,
+              },
+            });
+          } catch (e) {
+            console.warn('Failed to parse function call arguments in stream:', currentFunctionCall.arguments);
+            parts.push({
+              functionCall: {
+                id: currentFunctionCall.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                name: currentFunctionCall.name,
+                args: {},
+              },
+            });
+          }
+          // Reset for next function call
+          currentFunctionCall = {};
+        }
         
-        // If this is the end of tool calls, add them to parts
-        if (choice.finish_reason === 'tool_calls') {
+        // Finalize tool calls
+        if (currentToolCalls.length > 0) {
           for (const toolCall of currentToolCalls) {
-            try {
-              const args = JSON.parse(toolCall.call.arguments || '{}');
-              parts.push({
-                functionCall: {
-                  id: toolCall.call.id || 'call_' + Date.now(),
-                  name: toolCall.call.name || '',
-                  args,
-                },
-              });
-            } catch (e) {
-              parts.push({
-                functionCall: {
-                  id: toolCall.call.id || 'call_' + Date.now(),
-                  name: toolCall.call.name || '',
-                  args: {},
-                },
-              });
+            if (toolCall.call.name) { // Only process tool calls with names
+              try {
+                const args = toolCall.call.arguments ? JSON.parse(toolCall.call.arguments) : {};
+                parts.push({
+                  functionCall: {
+                    id: toolCall.call.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    name: toolCall.call.name,
+                    args,
+                  },
+                });
+              } catch (e) {
+                console.warn('Failed to parse tool call arguments in stream:', toolCall.call.arguments);
+                parts.push({
+                  functionCall: {
+                    id: toolCall.call.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    name: toolCall.call.name,
+                    args: {},
+                  },
+                });
+              }
             }
           }
+          // Reset for next batch of tool calls
+          currentToolCalls = [];
+        }
+        
+        if (choice.finish_reason === 'function_call' || choice.finish_reason === 'tool_calls') {
+          hasActiveToolCalls = false;
         }
       }
 
+      // Always yield if we have parts to send
       if (parts.length > 0) {
         const content: Content = {
           role: 'model',
           parts,
         };
+
+        // Extract function calls for the functionCalls property
+        const functionCalls = parts
+          .filter(part => part.functionCall)
+          .map(part => part.functionCall!);
 
         yield {
           candidates: [{
@@ -505,7 +560,85 @@ export class OpenAIContentGenerator implements ContentGenerator {
           }],
           text: undefined,
           data: undefined,
-          functionCalls: undefined,
+          functionCalls: functionCalls.length > 0 ? functionCalls : undefined,
+          executableCode: undefined,
+          codeExecutionResult: undefined,
+        };
+      }
+    }
+    
+    // Handle any remaining function calls that weren't finalized
+    if (hasActiveToolCalls) {
+      const parts: Part[] = [];
+      
+      // Finalize any remaining legacy function call
+      if (currentFunctionCall.name) {
+        try {
+          const args = currentFunctionCall.arguments ? JSON.parse(currentFunctionCall.arguments) : {};
+          parts.push({
+            functionCall: {
+              id: currentFunctionCall.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              name: currentFunctionCall.name,
+              args,
+            },
+          });
+        } catch (e) {
+          console.warn('Failed to parse remaining function call arguments:', currentFunctionCall.arguments);
+          parts.push({
+            functionCall: {
+              id: currentFunctionCall.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              name: currentFunctionCall.name,
+              args: {},
+            },
+          });
+        }
+      }
+      
+      // Finalize any remaining tool calls
+      for (const toolCall of currentToolCalls) {
+        if (toolCall.call.name) {
+          try {
+            const args = toolCall.call.arguments ? JSON.parse(toolCall.call.arguments) : {};
+            parts.push({
+              functionCall: {
+                id: toolCall.call.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                name: toolCall.call.name,
+                args,
+              },
+            });
+          } catch (e) {
+            console.warn('Failed to parse remaining tool call arguments:', toolCall.call.arguments);
+            parts.push({
+              functionCall: {
+                id: toolCall.call.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                name: toolCall.call.name,
+                args: {},
+              },
+            });
+          }
+        }
+      }
+      
+      if (parts.length > 0) {
+        const content: Content = {
+          role: 'model',
+          parts,
+        };
+
+        // Extract function calls for the functionCalls property
+        const functionCalls = parts
+          .filter(part => part.functionCall)
+          .map(part => part.functionCall!);
+
+        yield {
+          candidates: [{
+            content,
+            finishReason: FinishReason.STOP,
+            index: 0,
+          }],
+          text: undefined,
+          data: undefined,
+          functionCalls: functionCalls.length > 0 ? functionCalls : undefined,
           executableCode: undefined,
           codeExecutionResult: undefined,
         };
