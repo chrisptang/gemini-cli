@@ -39,5 +39,18 @@ export const validateAuthMethod = (authMethod: string): string | null => {
     return null;
   }
 
+  if (authMethod === AuthType.USE_OPENAI_COMPATIBLE) {
+    if (!process.env['OPENAI_API_KEY']) {
+      return 'OPENAI_API_KEY environment variable not found. Add that to your environment and try again (no reload needed if using .env)!';
+    }
+    if (!process.env['OPENAI_API_BASE']) {
+      return 'OPENAI_API_BASE environment variable not found. Set it to your OpenAI-compatible API base URL (e.g., https://api.openai.com/v1 for OpenAI, http://localhost:11434/v1 for Ollama)';
+    }
+    if (!process.env['OPENAI_MODEL']) {
+      return 'OPENAI_MODEL environment variable not found. Set it to the model name you want to use (e.g., gpt-4, llama2, claude-3-sonnet)';
+    }
+    return null;
+  }
+
   return 'Invalid auth method selected.';
 };

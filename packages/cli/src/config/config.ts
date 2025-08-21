@@ -73,6 +73,8 @@ export interface CliArgs {
   listExtensions: boolean | undefined;
   proxy: string | undefined;
   includeDirectories: string[] | undefined;
+  openaiApiBase: string | undefined;
+  openaiModel: string | undefined;
 }
 
 export async function parseArguments(): Promise<CliArgs> {
@@ -228,6 +230,18 @@ export async function parseArguments(): Promise<CliArgs> {
           coerce: (dirs: string[]) =>
             // Handle comma-separated values
             dirs.flatMap((dir) => dir.split(',').map((d) => d.trim())),
+        })
+        .option('openai-api-base', {
+          type: 'string',
+          description:
+            'Base URL for OpenAI-compatible API endpoint (e.g., https://api.openai.com/v1 for OpenAI, http://localhost:11434/v1 for Ollama)',
+          default: process.env['OPENAI_API_BASE'],
+        })
+        .option('openai-model', {
+          type: 'string',
+          description:
+            'Model name to use with OpenAI-compatible APIs (e.g., gpt-4, llama2, claude-3-sonnet)',
+          default: process.env['OPENAI_MODEL'],
         })
 
         .check((argv) => {
