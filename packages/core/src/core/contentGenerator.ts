@@ -20,6 +20,7 @@ import { Config } from '../config/config.js';
 import { UserTierId } from '../code_assist/types.js';
 import { LoggingContentGenerator } from './loggingContentGenerator.js';
 import { InstallationManager } from '../utils/installationManager.js';
+import { OpenAIContentGenerator } from '../openai/openaiContentGenerator.js';
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
@@ -47,6 +48,7 @@ export enum AuthType {
   USE_GEMINI = 'gemini-api-key',
   USE_VERTEX_AI = 'vertex-ai',
   CLOUD_SHELL = 'cloud-shell',
+  USE_OPENAI_COMPATIBLE = 'openai-compatible',
 }
 
 export type ContentGeneratorConfig = {
@@ -55,6 +57,8 @@ export type ContentGeneratorConfig = {
   vertexai?: boolean;
   authType?: AuthType | undefined;
   proxy?: string | undefined;
+  openaiApiBase?: string;
+  openaiModel?: string;
 };
 
 export function createContentGeneratorConfig(
@@ -65,9 +69,12 @@ export function createContentGeneratorConfig(
   const googleApiKey = process.env['GOOGLE_API_KEY'] || undefined;
   const googleCloudProject = process.env['GOOGLE_CLOUD_PROJECT'] || undefined;
   const googleCloudLocation = process.env['GOOGLE_CLOUD_LOCATION'] || undefined;
+  const openaiApiKey = process.env['OPENAI_API_KEY'] || undefined;
+  const openaiApiBase = process.env['OPENAI_API_BASE'] || undefined;
+  const openaiModel = process.env['OPENAI_MODEL'] || undefined;
 
   // Use runtime model from config if available; otherwise, fall back to parameter or default
-  const effectiveModel = config.getModel() || DEFAULT_GEMINI_MODEL;
+  const effectiveModel = config.getModel() || openaiModel || DEFAULT_GEMINI_MODEL;
 
   const contentGeneratorConfig: ContentGeneratorConfig = {
     model: effectiveModel,
@@ -96,6 +103,15 @@ export function createContentGeneratorConfig(
   ) {
     contentGeneratorConfig.apiKey = googleApiKey;
     contentGeneratorConfig.vertexai = true;
+
+    return contentGeneratorConfig;
+  }
+
+  if (authType === AuthType.USE_OPENAI_COMPATIBLE && openaiApiKey) {
+    contentGeneratorConfig.apiKey = openaiApiKey;
+    contentGeneratorConfig.openaiApiBase = openaiApiBase || 'https://api.openai.com/v1';
+    contentGeneratorConfig.openaiModel = openaiModel || effectiveModel;
+    contentGeneratorConfig.vertexai = false;
 
     return contentGeneratorConfig;
   }
@@ -152,6 +168,26 @@ export async function createContentGenerator(
     });
     return new LoggingContentGenerator(googleGenAI.models, gcConfig);
   }
+
+  if (config.authType === AuthType.USE_OPENAI_COMPATIBLE) {
+    if (!config.apiKey) {
+      throw new Error('OpenAI API key is required for OpenAI-compatible APIs');
+    }
+    if (!config.openaiApiBase) {
+      throw new Error('OpenAI API base URL is required for OpenAI-compatible APIs');
+    }
+    if (!config.openaiModel) {
+      throw new Error('OpenAI model is required for OpenAI-compatible APIs');
+    }
+
+    const openaiGenerator = new OpenAIContentGenerator(
+      config.apiKey,
+      config.openaiApiBase,
+      config.openaiModel,
+    );
+    return new LoggingContentGenerator(openaiGenerator, gcConfig);
+  }
+
   throw new Error(
     `Error creating contentGenerator: Unsupported authType: ${config.authType}`,
   );

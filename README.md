@@ -164,6 +164,43 @@ export GOOGLE_GENAI_USE_VERTEXAI=true
 gemini
 ```
 
+### Option 4: OpenAI-Compatible APIs
+
+**✨ Best for:** Using alternative LLM providers while keeping Gemini CLI features
+
+**Benefits:**
+
+- **Provider flexibility**: OpenAI, Anthropic, Ollama, LocalAI, Together.ai, Groq, and more
+- **Local models**: Run models locally with Ollama for privacy
+- **Full feature support**: All Gemini CLI tools work with compatible providers
+- **Easy switching**: Change providers without losing your workflow
+
+```bash
+# Configure for your provider (example with OpenAI)
+export OPENAI_API_KEY="sk-..."
+export OPENAI_API_BASE="https://api.openai.com/v1"
+export OPENAI_MODEL="gpt-4"
+gemini
+```
+
+**Popular configurations:**
+
+```bash
+# OpenAI
+export OPENAI_API_BASE="https://api.openai.com/v1"
+export OPENAI_MODEL="gpt-4"
+
+# Ollama (local)
+export OPENAI_API_BASE="http://localhost:11434/v1"
+export OPENAI_MODEL="llama2"
+
+# Anthropic Claude (via proxy)
+export OPENAI_API_BASE="https://proxy.example.com/v1"
+export OPENAI_MODEL="claude-3-sonnet"
+```
+
+See the [OpenAI-Compatible APIs Guide](./docs/openai-compatible-apis.md) for detailed setup instructions.
+
 For Google Workspace accounts and other authentication methods, see the [authentication guide](./docs/cli/authentication.md).
 
 ## 🚀 Getting Started
