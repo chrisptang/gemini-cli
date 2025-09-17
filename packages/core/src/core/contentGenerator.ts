@@ -4,23 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   CountTokensResponse,
   GenerateContentResponse,
   GenerateContentParameters,
   CountTokensParameters,
   EmbedContentResponse,
   EmbedContentParameters,
-  GoogleGenAI,
 } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
-import { DEFAULT_GEMINI_MODEL } from '../config/models.js';
-import { Config } from '../config/config.js';
+import type { Config } from '../config/config.js';
 
-import { UserTierId } from '../code_assist/types.js';
+import type { UserTierId } from '../code_assist/types.js';
 import { LoggingContentGenerator } from './loggingContentGenerator.js';
 import { InstallationManager } from '../utils/installationManager.js';
 import { OpenAIContentGenerator } from '../openai/openaiContentGenerator.js';
+import { DEFAULT_GEMINI_MODEL } from '../config/models.js';
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
@@ -52,11 +52,10 @@ export enum AuthType {
 }
 
 export type ContentGeneratorConfig = {
-  model: string;
   apiKey?: string;
   vertexai?: boolean;
-  authType?: AuthType | undefined;
-  proxy?: string | undefined;
+  authType?: AuthType;
+  proxy?: string;
   openaiApiBase?: string;
   openaiModel?: string;
 };
@@ -73,11 +72,10 @@ export function createContentGeneratorConfig(
   const openaiApiBase = process.env['OPENAI_API_BASE'] || undefined;
   const openaiModel = process.env['OPENAI_MODEL'] || undefined;
 
-  // Use runtime model from config if available; otherwise, fall back to parameter or default
+  // 使用运行时配置中的模型，如果不可用则回退到参数或默认值
   const effectiveModel = config.getModel() || openaiModel || DEFAULT_GEMINI_MODEL;
 
   const contentGeneratorConfig: ContentGeneratorConfig = {
-    model: effectiveModel,
     authType,
     proxy: config?.getProxy(),
   };

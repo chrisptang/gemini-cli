@@ -6,12 +6,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
-import { Colors } from '../colors.js';
-import {
-  LoadedSettings,
-  SettingScope,
-  Settings,
-} from '../../config/settings.js';
+import { theme } from '../semantic-colors.js';
+import type { LoadedSettings, Settings } from '../../config/settings.js';
+import { SettingScope } from '../../config/settings.js';
 import {
   getScopeItems,
   getScopeMessageForSetting,
@@ -19,7 +16,6 @@ import {
 import { RadioButtonSelect } from './shared/RadioButtonSelect.js';
 import {
   getDialogSettingKeys,
-  getSettingValue,
   setPendingSettingValue,
   getDisplayValue,
   hasRestartRequiredSettings,
@@ -31,11 +27,16 @@ import {
   getDefaultValue,
   setPendingSettingValueAny,
   getNestedValue,
+  getEffectiveValue,
 } from '../../utils/settingsUtils.js';
 import { useVimMode } from '../contexts/VimModeContext.js';
 import { useKeypress } from '../hooks/useKeypress.js';
 import chalk from 'chalk';
-import { cpSlice, cpLen } from '../utils/textUtils.js';
+import { cpSlice, cpLen, stripUnsafeCharacters } from '../utils/textUtils.js';
+import {
+  type SettingsValue,
+  TOGGLE_TYPES,
+} from '../../config/settingsSchema.js';
 
 interface SettingsDialogProps {
   settings: LoadedSettings;
@@ -78,8 +79,8 @@ export function SettingsDialog({
     new Set(),
   );
 
-  // Preserve pending changes across scope switches (boolean and number values only)
-  type PendingValue = boolean | number;
+  // Preserve pending changes across scope switches
+  type PendingValue = boolean | number | string;
   const [globalPendingChanges, setGlobalPendingChanges] = useState<
     Map<string, PendingValue>
   >(new Map());
@@ -99,7 +100,10 @@ export function SettingsDialog({
       const def = getSettingDefinition(key);
       if (def?.type === 'boolean' && typeof value === 'boolean') {
         updated = setPendingSettingValue(key, value, updated);
-      } else if (def?.type === 'number' && typeof value === 'number') {
+      } else if (
+        (def?.type === 'number' && typeof value === 'number') ||
+        (def?.type === 'string' && typeof value === 'string')
+      ) {
         updated = setPendingSettingValueAny(key, value, updated);
       }
       newModified.add(key);
@@ -122,15 +126,33 @@ export function SettingsDialog({
         value: key,
         type: definition?.type,
         toggle: () => {
-          if (definition?.type !== 'boolean') {
-            // For non-boolean (e.g., number) items, toggle will be handled via edit mode.
+          if (!TOGGLE_TYPES.has(definition?.type)) {
             return;
           }
-          const currentValue = getSettingValue(key, pendingSettings, {});
-          const newValue = !currentValue;
+          const currentValue = getEffectiveValue(key, pendingSettings, {});
+          let newValue: SettingsValue;
+          if (definition?.type === 'boolean') {
+            newValue = !(currentValue as boolean);
+            setPendingSettings((prev) =>
+              setPendingSettingValue(key, newValue as boolean, prev),
+            );
+          } else if (definition?.type === 'enum' && definition.options) {
+            const options = definition.options;
+            const currentIndex = options?.findIndex(
+              (opt) => opt.value === currentValue,
+            );
+            if (currentIndex !== -1 && currentIndex < options.length - 1) {
+              newValue = options[currentIndex + 1].value;
+            } else {
+              newValue = options[0].value; // loop back to start.
+            }
+            setPendingSettings((prev) =>
+              setPendingSettingValueAny(key, newValue, prev),
+            );
+          }
 
           setPendingSettings((prev) =>
-            setPendingSettingValue(key, newValue, prev),
+            setPendingSettingValue(key, newValue as boolean, prev),
           );
 
           if (!requiresRestart(key)) {
@@ -153,7 +175,7 @@ export function SettingsDialog({
             );
 
             // Special handling for vim mode to sync with VimModeContext
-            if (key === 'vimMode' && newValue !== vimEnabled) {
+            if (key === 'general.vimMode' && newValue !== vimEnabled) {
               // Call toggleVimEnabled to sync the VimModeContext local state
               toggleVimEnabled().catch((error) => {
                 console.error('Failed to toggle vim mode:', error);
@@ -220,7 +242,7 @@ export function SettingsDialog({
 
   const items = generateSettingsItems();
 
-  // Number edit state
+  // Generic edit state
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editBuffer, setEditBuffer] = useState<string>('');
   const [editCursorPos, setEditCursorPos] = useState<number>(0); // Cursor position within edit buffer
@@ -235,28 +257,39 @@ export function SettingsDialog({
     return () => clearInterval(id);
   }, [editingKey]);
 
-  const startEditingNumber = (key: string, initial?: string) => {
+  const startEditing = (key: string, initial?: string) => {
     setEditingKey(key);
     const initialValue = initial ?? '';
     setEditBuffer(initialValue);
     setEditCursorPos(cpLen(initialValue)); // Position cursor at end of initial value
   };
 
-  const commitNumberEdit = (key: string) => {
-    if (editBuffer.trim() === '') {
-      // Nothing entered; cancel edit
+  const commitEdit = (key: string) => {
+    const definition = getSettingDefinition(key);
+    const type = definition?.type;
+
+    if (editBuffer.trim() === '' && type === 'number') {
+      // Nothing entered for a number; cancel edit
       setEditingKey(null);
       setEditBuffer('');
       setEditCursorPos(0);
       return;
     }
-    const parsed = Number(editBuffer.trim());
-    if (Number.isNaN(parsed)) {
-      // Invalid number; cancel edit
-      setEditingKey(null);
-      setEditBuffer('');
-      setEditCursorPos(0);
-      return;
+
+    let parsed: string | number;
+    if (type === 'number') {
+      const numParsed = Number(editBuffer.trim());
+      if (Number.isNaN(numParsed)) {
+        // Invalid number; cancel edit
+        setEditingKey(null);
+        setEditBuffer('');
+        setEditCursorPos(0);
+        return;
+      }
+      parsed = numParsed;
+    } else {
+      // For strings, use the buffer as is.
+      parsed = editBuffer;
     }
 
     // Update pending
@@ -347,10 +380,16 @@ export function SettingsDialog({
         setFocusSection((prev) => (prev === 'settings' ? 'scope' : 'settings'));
       }
       if (focusSection === 'settings') {
-        // If editing a number, capture numeric input and control keys
+        // If editing, capture input and control keys
         if (editingKey) {
+          const definition = getSettingDefinition(editingKey);
+          const type = definition?.type;
+
           if (key.paste && key.sequence) {
-            const pasted = key.sequence.replace(/[^0-9\-+.]/g, '');
+            let pasted = key.sequence;
+            if (type === 'number') {
+              pasted = key.sequence.replace(/[^0-9\-+.]/g, '');
+            }
             if (pasted) {
               setEditBuffer((b) => {
                 const before = cpSlice(b, 0, editCursorPos);
@@ -380,16 +419,27 @@ export function SettingsDialog({
             return;
           }
           if (name === 'escape') {
-            commitNumberEdit(editingKey);
+            commitEdit(editingKey);
             return;
           }
           if (name === 'return') {
-            commitNumberEdit(editingKey);
+            commitEdit(editingKey);
             return;
           }
-          // Allow digits, minus, plus, and dot
-          const ch = key.sequence;
-          if (/[0-9\-+.]/.test(ch)) {
+
+          let ch = key.sequence;
+          let isValidChar = false;
+          if (type === 'number') {
+            // Allow digits, minus, plus, and dot.
+            isValidChar = /[0-9\-+.]/.test(ch);
+          } else {
+            ch = stripUnsafeCharacters(ch);
+            // For strings, allow any single character that isn't a control
+            // sequence.
+            isValidChar = ch.length === 1;
+          }
+
+          if (isValidChar) {
             setEditBuffer((currentBuffer) => {
               const beforeCursor = cpSlice(currentBuffer, 0, editCursorPos);
               const afterCursor = cpSlice(currentBuffer, editCursorPos);
@@ -398,6 +448,7 @@ export function SettingsDialog({
             setEditCursorPos((pos) => pos + 1);
             return;
           }
+
           // Arrow key navigation
           if (name === 'left') {
             setEditCursorPos((pos) => Math.max(0, pos - 1));
@@ -422,7 +473,7 @@ export function SettingsDialog({
         if (name === 'up' || name === 'k') {
           // If editing, commit first
           if (editingKey) {
-            commitNumberEdit(editingKey);
+            commitEdit(editingKey);
           }
           const newIndex =
             activeSettingIndex > 0 ? activeSettingIndex - 1 : items.length - 1;
@@ -436,7 +487,7 @@ export function SettingsDialog({
         } else if (name === 'down' || name === 'j') {
           // If editing, commit first
           if (editingKey) {
-            commitNumberEdit(editingKey);
+            commitEdit(editingKey);
           }
           const newIndex =
             activeSettingIndex < items.length - 1 ? activeSettingIndex + 1 : 0;
@@ -449,15 +500,18 @@ export function SettingsDialog({
           }
         } else if (name === 'return' || name === 'space') {
           const currentItem = items[activeSettingIndex];
-          if (currentItem?.type === 'number') {
-            startEditingNumber(currentItem.value);
+          if (
+            currentItem?.type === 'number' ||
+            currentItem?.type === 'string'
+          ) {
+            startEditing(currentItem.value);
           } else {
             currentItem?.toggle();
           }
         } else if (/^[0-9]$/.test(key.sequence || '') && !editingKey) {
           const currentItem = items[activeSettingIndex];
           if (currentItem?.type === 'number') {
-            startEditingNumber(currentItem.value, key.sequence);
+            startEditing(currentItem.value, key.sequence);
           }
         } else if (ctrl && (name === 'c' || name === 'l')) {
           // Ctrl+C or Ctrl+L: Clear current setting and reset to default
@@ -475,8 +529,11 @@ export function SettingsDialog({
                   prev,
                 ),
               );
-            } else if (defType === 'number') {
-              if (typeof defaultValue === 'number') {
+            } else if (defType === 'number' || defType === 'string') {
+              if (
+                typeof defaultValue === 'number' ||
+                typeof defaultValue === 'string'
+              ) {
                 setPendingSettings((prev) =>
                   setPendingSettingValueAny(
                     currentSetting.value,
@@ -509,7 +566,8 @@ export function SettingsDialog({
                   ? typeof defaultValue === 'boolean'
                     ? defaultValue
                     : false
-                  : typeof defaultValue === 'number'
+                  : typeof defaultValue === 'number' ||
+                      typeof defaultValue === 'string'
                     ? defaultValue
                     : undefined;
               const immediateSettingsObject =
@@ -541,7 +599,9 @@ export function SettingsDialog({
                 (currentSetting.type === 'boolean' &&
                   typeof defaultValue === 'boolean') ||
                 (currentSetting.type === 'number' &&
-                  typeof defaultValue === 'number')
+                  typeof defaultValue === 'number') ||
+                (currentSetting.type === 'string' &&
+                  typeof defaultValue === 'string')
               ) {
                 setGlobalPendingChanges((prev) => {
                   const next = new Map(prev);
@@ -584,7 +644,7 @@ export function SettingsDialog({
       }
       if (name === 'escape') {
         if (editingKey) {
-          commitNumberEdit(editingKey);
+          commitEdit(editingKey);
         } else {
           onSelect(undefined, selectedScope);
         }
@@ -596,18 +656,18 @@ export function SettingsDialog({
   return (
     <Box
       borderStyle="round"
-      borderColor={Colors.Gray}
+      borderColor={theme.border.default}
       flexDirection="row"
       padding={1}
       width="100%"
       height="100%"
     >
       <Box flexDirection="column" flexGrow={1}>
-        <Text bold color={Colors.AccentBlue}>
+        <Text bold color={theme.text.link}>
           Settings
         </Text>
         <Box height={1} />
-        {showScrollUp && <Text color={Colors.Gray}>▲</Text>}
+        {showScrollUp && <Text color={theme.text.secondary}>▲</Text>}
         {visibleItems.map((item, idx) => {
           const isActive =
             focusSection === 'settings' &&
@@ -637,8 +697,8 @@ export function SettingsDialog({
               // Cursor not visible
               displayValue = editBuffer;
             }
-          } else if (item.type === 'number') {
-            // For numbers, get the actual current value from pending settings
+          } else if (item.type === 'number' || item.type === 'string') {
+            // For numbers/strings, get the actual current value from pending settings
             const path = item.value.split('.');
             const currentValue = getNestedValue(pendingSettings, path);
 
@@ -688,17 +748,21 @@ export function SettingsDialog({
             <React.Fragment key={item.value}>
               <Box flexDirection="row" alignItems="center">
                 <Box minWidth={2} flexShrink={0}>
-                  <Text color={isActive ? Colors.AccentGreen : Colors.Gray}>
+                  <Text
+                    color={
+                      isActive ? theme.status.success : theme.text.secondary
+                    }
+                  >
                     {isActive ? '●' : ''}
                   </Text>
                 </Box>
                 <Box minWidth={50}>
                   <Text
-                    color={isActive ? Colors.AccentGreen : Colors.Foreground}
+                    color={isActive ? theme.status.success : theme.text.primary}
                   >
                     {item.label}
                     {scopeMessage && (
-                      <Text color={Colors.Gray}> {scopeMessage}</Text>
+                      <Text color={theme.text.secondary}> {scopeMessage}</Text>
                     )}
                   </Text>
                 </Box>
@@ -706,10 +770,10 @@ export function SettingsDialog({
                 <Text
                   color={
                     isActive
-                      ? Colors.AccentGreen
+                      ? theme.status.success
                       : shouldBeGreyedOut
-                        ? Colors.Gray
-                        : Colors.Foreground
+                        ? theme.text.secondary
+                        : theme.text.primary
                   }
                 >
                   {displayValue}
@@ -719,7 +783,7 @@ export function SettingsDialog({
             </React.Fragment>
           );
         })}
-        {showScrollDown && <Text color={Colors.Gray}>▼</Text>}
+        {showScrollDown && <Text color={theme.text.secondary}>▼</Text>}
 
         <Box height={1} />
 
@@ -738,11 +802,11 @@ export function SettingsDialog({
         </Box>
 
         <Box height={1} />
-        <Text color={Colors.Gray}>
+        <Text color={theme.text.secondary}>
           (Use Enter to select, Tab to change focus)
         </Text>
         {showRestartPrompt && (
-          <Text color={Colors.AccentYellow}>
+          <Text color={theme.status.warning}>
             To see changes, Gemini CLI must be restarted. Press r to exit and
             apply changes now.
           </Text>
