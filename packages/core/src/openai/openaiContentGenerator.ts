@@ -4,20 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  CountTokensResponse,
-  GenerateContentResponse,
+import type {
   GenerateContentParameters,
   CountTokensParameters,
-  EmbedContentResponse,
   EmbedContentParameters,
   Content,
   Part,
   FunctionCall,
-  FinishReason,
   Tool,
 } from '@google/genai';
-import { ContentGenerator } from '../core/contentGenerator.js';
+import {
+  CountTokensResponse,
+  GenerateContentResponse,
+  EmbedContentResponse,
+  FinishReason,
+} from '@google/genai';
+import type { ContentGenerator } from '../core/contentGenerator.js';
 
 interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'function' | 'tool';
