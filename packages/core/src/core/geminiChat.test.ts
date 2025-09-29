@@ -188,20 +188,20 @@ describe('GeminiChat', () => {
       expect(modelTurn?.parts![0]!.functionCall).toBeDefined();
     });
 
-    it('should fail if the stream ends with an empty part and has no finishReason', async () => {
-      // 1. Mock a stream that ends with an invalid part and has no finish reason.
+    it('should succeed if the stream ends with an empty part but had valid content earlier and has no finishReason', async () => {
+      // 1. Mock a stream that sends a valid chunk, then an invalid one, with no finish reason.
       const streamWithNoFinish = (async function* () {
         yield {
           candidates: [
             {
               content: {
                 role: 'model',
-                parts: [{ text: 'Initial content...' }],
+                parts: [{ text: 'Initial valid content...' }],
               },
             },
           ],
         } as unknown as GenerateContentResponse;
-        // This second chunk is invalid and has no finishReason, so it should fail.
+        // This second chunk is invalid and has no finishReason, but we had valid content earlier.
         yield {
           candidates: [
             {
@@ -218,7 +218,7 @@ describe('GeminiChat', () => {
         streamWithNoFinish,
       );
 
-      // 2. Action & Assert: The stream should fail because there's no finish reason.
+      // 2. Action & Assert: The stream should succeed because there was valid content earlier.
       const stream = await chat.sendMessageStream(
         'test-model',
         { message: 'test message' },
@@ -230,7 +230,7 @@ describe('GeminiChat', () => {
             /* consume stream */
           }
         })(),
-      ).rejects.toThrow(EmptyStreamError);
+      ).resolves.toBeUndefined();
     });
 
     it('should succeed if the stream ends with an invalid part but has a finishReason and contained a valid part', async () => {
@@ -1134,22 +1134,19 @@ describe('GeminiChat', () => {
   });
 
   it('should discard valid partial content from a failed attempt upon retry', async () => {
-    // Mock the stream to fail on the first attempt after yielding some valid content.
+    // Mock the stream to fail on the first attempt with invalid content from the start.
     vi.mocked(mockContentGenerator.generateContentStream)
       .mockImplementationOnce(async () =>
-        // First attempt: yields one valid chunk, then one invalid chunk
+        // First attempt: yields invalid content from the start
         (async function* () {
           yield {
             candidates: [
               {
                 content: {
-                  parts: [{ text: 'This valid part should be discarded' }],
+                  parts: [{ text: '' }], // Invalid chunk triggers retry
                 },
               },
             ],
-          } as unknown as GenerateContentResponse;
-          yield {
-            candidates: [{ content: { parts: [{ text: '' }] } }], // Invalid chunk triggers retry
           } as unknown as GenerateContentResponse;
         })(),
       )
