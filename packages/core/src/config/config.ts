@@ -60,6 +60,7 @@ import { RipgrepFallbackEvent } from '../telemetry/types.js';
 import type { FallbackModelHandler } from '../fallback/types.js';
 import { ModelRouterService } from '../routing/modelRouterService.js';
 import { OutputFormat } from '../output/types.js';
+import { OpenAIContentGenerator } from '../openai/openaiContentGenerator.js';
 
 // Re-export OAuth config type
 export type { MCPOAuthConfig, AnyToolInvocation };
@@ -539,12 +540,42 @@ export class Config {
   }
 
   setModel(newModel: string): void {
-    // Do not allow Pro usage if the user is in fallback mode.
-    if (newModel.includes('pro') && this.isInFallbackMode()) {
-      return;
-    }
-
     this.model = newModel;
+
+    // 如果使用 OpenAI 兼容 API，直接更新 ContentGenerator 中的模型
+    if (this.contentGeneratorConfig?.authType === AuthType.USE_OPENAI_COMPATIBLE) {
+      if (this.contentGenerator instanceof OpenAIContentGenerator) {
+        this.contentGenerator.setModel(newModel);
+      }
+    } else if (this.contentGeneratorConfig) {
+      // 对于其他类型的认证，我们需要刷新整个 ContentGenerator 以确保模型更改生效
+      // 这会重新调用 createContentGeneratorConfig，从而使用新的模型设置
+      this.refreshContentGeneratorWithUpdatedModel();
+    }
+  }
+
+  /**
+   * 刷新 ContentGenerator 以使用更新后的模型配置
+   */
+  private refreshContentGeneratorWithUpdatedModel(): void {
+    if (this.contentGeneratorConfig && this.contentGenerator) {
+      try {
+        // 重新创建 ContentGenerator 实例以使用新模型
+        createContentGenerator(
+          this.contentGeneratorConfig,
+          this,
+          this.getSessionId(),
+        ).then(newContentGenerator => {
+          this.contentGenerator = newContentGenerator;
+          // 重新初始化 BaseLlmClient
+          this.baseLlmClient = new BaseLlmClient(this.contentGenerator, this);
+        }).catch(error => {
+          console.error('Failed to refresh ContentGenerator with new model:', error);
+        });
+      } catch (error) {
+        console.error('Failed to refresh ContentGenerator with new model:', error);
+      }
+    }
   }
 
   isInFallbackMode(): boolean {

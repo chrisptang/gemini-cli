@@ -20,7 +20,7 @@ import type { UserTierId } from '../code_assist/types.js';
 import { LoggingContentGenerator } from './loggingContentGenerator.js';
 import { InstallationManager } from '../utils/installationManager.js';
 import { OpenAIContentGenerator } from '../openai/openaiContentGenerator.js';
-import { DEFAULT_GEMINI_MODEL } from '../config/models.js';
+
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
@@ -112,12 +112,14 @@ export function createContentGeneratorConfig(
   const googleCloudLocation = process.env['GOOGLE_CLOUD_LOCATION'] || undefined;
   const openaiApiKey = process.env['OPENAI_API_KEY'] || undefined;
   const openaiApiBase = process.env['OPENAI_API_BASE'] || undefined;
-  const openaiModel = process.env['OPENAI_MODEL'] || undefined;
-
-  // 使用运行时配置中的模型，如果不可用则回退到参数或默认值
-  // 优先级：config.getModel() (session切换) > openaiModel (环境变量) > 默认模型
-  const effectiveModel =
-    config.getModel() || openaiModel || DEFAULT_GEMINI_MODEL;
+  // 使用配置中的模型，该模型已经包含了完整的优先级逻辑：
+  // 1. Session中切换的模型 (/model model-name) - 最高优先级
+  // 2. 命令行参数 (--model model-name) - 第二优先级
+  // 3. OPENAI_MODEL环境变量 - 第三优先级
+  // 4. GEMINI_MODEL环境变量 - 第四优先级
+  // 5. 设置文件中的模型 - 第五优先级
+  // 6. 默认模型 - 最低优先级
+  const effectiveModel = config.getModel();
 
   const contentGeneratorConfig: ContentGeneratorConfig = {
     authType,

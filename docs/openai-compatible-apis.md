@@ -32,7 +32,7 @@ When prompted for authentication, select **"OpenAI-Compatible API"**.
 You can also specify the configuration via command-line arguments:
 
 ```bash
-gemini --openai-api-base https://api.openai.com/v1 --openai-model gpt-4
+gemini --openai-api-base https://api.openai.com/v1 --model gpt-4
 ```
 
 ## Supported Providers
@@ -109,7 +109,7 @@ export OPENAI_MODEL="mixtral-8x7b-32768"
 | Argument            | Description           |
 | ------------------- | --------------------- |
 | `--openai-api-base` | Override API base URL |
-| `--openai-model`    | Override model name   |
+| `--model`, `-m`     | Override model name   |
 
 ### Using .env Files
 

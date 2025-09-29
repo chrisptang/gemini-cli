@@ -242,7 +242,6 @@ describe('gemini.tsx main function kitty protocol', () => {
       proxy: undefined,
       includeDirectories: undefined,
       openaiApiBase: undefined,
-      openaiModel: undefined,
       screenReader: undefined,
       useSmartEdit: undefined,
       promptWords: undefined,

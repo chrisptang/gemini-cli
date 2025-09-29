@@ -80,7 +80,6 @@ export interface CliArgs {
   proxy: string | undefined;
   includeDirectories: string[] | undefined;
   openaiApiBase: string | undefined;
-  openaiModel: string | undefined;
   screenReader: boolean | undefined;
   useSmartEdit: boolean | undefined;
   promptWords: string[] | undefined;
@@ -234,12 +233,7 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
             'Base URL for OpenAI-compatible API endpoint (e.g., https://api.openai.com/v1 for OpenAI, http://localhost:11434/v1 for Ollama)',
           default: process.env['OPENAI_API_BASE'],
         })
-        .option('openai-model', {
-          type: 'string',
-          description:
-            'Model name to use with OpenAI-compatible APIs (e.g., gpt-4, llama2, claude-3-sonnet)',
-          default: process.env['OPENAI_MODEL'],
-        })
+
         .option('screen-reader', {
           type: 'boolean',
           description: 'Enable screen reader mode for accessibility.',

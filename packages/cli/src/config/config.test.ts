@@ -2195,3 +2195,110 @@ describe('parseArguments with positional prompt', () => {
     expect(argv.prompt).toBe('test prompt');
   });
 });
+
+describe('Model Priority Logic', () => {
+  let originalEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    // 保存原始环境变量
+    originalEnv = { ...process.env };
+  });
+
+  afterEach(() => {
+    // 恢复原始环境变量
+    process.env = originalEnv;
+  });
+
+  it('should prioritize --model parameter over OPENAI_MODEL environment variable', async () => {
+    // 设置环境变量
+    process.env['OPENAI_MODEL'] = 'env-model';
+    process.env['GEMINI_MODEL'] = 'gemini-env-model';
+
+    // 模拟命令行参数
+    process.argv = ['node', 'script.js', '--model', 'cli-model'];
+
+    const settings: Settings = {
+      model: { name: 'settings-model' }
+    } as Settings;
+
+    const argv = await parseArguments(settings);
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+
+    // 命令行参数应该有最高优先级
+    expect(config.getModel()).toBe('cli-model');
+  });
+
+  it('should use OPENAI_MODEL when --model is not provided', async () => {
+    // 设置环境变量
+    process.env['OPENAI_MODEL'] = 'openai-env-model';
+    process.env['GEMINI_MODEL'] = 'gemini-env-model';
+
+    // 不提供命令行参数
+    process.argv = ['node', 'script.js'];
+
+    const settings: Settings = {
+      model: { name: 'settings-model' }
+    } as Settings;
+
+    const argv = await parseArguments(settings);
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+
+    // OPENAI_MODEL 应该优先于 GEMINI_MODEL 和设置文件
+    expect(config.getModel()).toBe('openai-env-model');
+  });
+
+  it('should use GEMINI_MODEL when --model and OPENAI_MODEL are not provided', async () => {
+    // 只设置 GEMINI_MODEL
+    delete process.env['OPENAI_MODEL'];
+    process.env['GEMINI_MODEL'] = 'gemini-env-model';
+
+    // 不提供命令行参数
+    process.argv = ['node', 'script.js'];
+
+    const settings: Settings = {
+      model: { name: 'settings-model' }
+    } as Settings;
+
+    const argv = await parseArguments(settings);
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+
+    // GEMINI_MODEL 应该优先于设置文件
+    expect(config.getModel()).toBe('gemini-env-model');
+  });
+
+  it('should use settings model when no command line or environment variables are provided', async () => {
+    // 清除环境变量
+    delete process.env['OPENAI_MODEL'];
+    delete process.env['GEMINI_MODEL'];
+
+    // 不提供命令行参数
+    process.argv = ['node', 'script.js'];
+
+    const settings: Settings = {
+      model: { name: 'settings-model' }
+    } as Settings;
+
+    const argv = await parseArguments(settings);
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+
+    // 应该使用设置文件中的模型
+    expect(config.getModel()).toBe('settings-model');
+  });
+
+  it('should use default model when no configuration is provided', async () => {
+    // 清除环境变量
+    delete process.env['OPENAI_MODEL'];
+    delete process.env['GEMINI_MODEL'];
+
+    // 不提供命令行参数
+    process.argv = ['node', 'script.js'];
+
+    const settings: Settings = {} as Settings;
+
+    const argv = await parseArguments(settings);
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+
+    // 应该使用默认模型
+    expect(config.getModel()).toBe(DEFAULT_GEMINI_MODEL);
+  });
+});

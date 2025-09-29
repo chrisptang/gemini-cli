@@ -141,11 +141,23 @@ interface OpenAIStreamChunk {
 }
 
 export class OpenAIContentGenerator implements ContentGenerator {
+  private model: string;
+
   constructor(
     private apiKey: string,
     private apiBase: string,
-    private model: string,
-  ) {}
+    model: string,
+  ) {
+    this.model = model;
+  }
+
+  /**
+   * 更新模型名称
+   * @param newModel 新的模型名称
+   */
+  setModel(newModel: string): void {
+    this.model = newModel;
+  }
 
   async generateContent(
     request: GenerateContentParameters,
