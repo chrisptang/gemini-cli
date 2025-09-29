@@ -60,6 +60,48 @@ export type ContentGeneratorConfig = {
   openaiModel?: string;
 };
 
+/**
+ * 智能检测模型类型并返回相应的API基础URL
+ * @param modelName 模型名称
+ * @returns 对应的API基础URL，如果无法识别则返回null
+ */
+function detectModelApiBase(modelName: string): string | null {
+  const model = modelName.toLowerCase();
+
+  // DeepSeek模型
+  if (model.includes('deepseek') || model.includes('ds-')) {
+    return 'https://api.deepseek.com';
+  }
+
+  // OpenAI模型
+  if (model.includes('gpt-') || model.includes('openai')) {
+    return 'https://api.openai.com/v1';
+  }
+
+  // Anthropic Claude模型
+  if (model.includes('claude') || model.includes('anthropic')) {
+    return 'https://api.anthropic.com/v1';
+  }
+
+  // Groq模型
+  if (model.includes('groq') || model.includes('mixtral') || model.includes('llama')) {
+    return 'https://api.groq.com/openai/v1';
+  }
+
+  // Together.ai模型
+  if (model.includes('together') || model.includes('/')) {
+    return 'https://api.together.xyz/v1';
+  }
+
+  // 本地Ollama
+  if (model.includes('llama') || model.includes('mistral') || model.includes('codellama')) {
+    return 'http://localhost:11434/v1';
+  }
+
+  // 默认识别为OpenAI兼容API
+  return 'https://api.openai.com/v1';
+}
+
 export function createContentGeneratorConfig(
   config: Config,
   authType: AuthType | undefined,
@@ -73,7 +115,9 @@ export function createContentGeneratorConfig(
   const openaiModel = process.env['OPENAI_MODEL'] || undefined;
 
   // 使用运行时配置中的模型，如果不可用则回退到参数或默认值
-  const effectiveModel = config.getModel() || openaiModel || DEFAULT_GEMINI_MODEL;
+  // 优先级：config.getModel() (session切换) > openaiModel (环境变量) > 默认模型
+  const effectiveModel =
+    config.getModel() || openaiModel || DEFAULT_GEMINI_MODEL;
 
   const contentGeneratorConfig: ContentGeneratorConfig = {
     authType,
@@ -107,11 +151,30 @@ export function createContentGeneratorConfig(
 
   if (authType === AuthType.USE_OPENAI_COMPATIBLE && openaiApiKey) {
     contentGeneratorConfig.apiKey = openaiApiKey;
-    contentGeneratorConfig.openaiApiBase = openaiApiBase || 'https://api.openai.com/v1';
-    contentGeneratorConfig.openaiModel = openaiModel || effectiveModel;
+
+    // 智能检测模型类型并设置相应的API基础URL
+    const detectedApiBase = detectModelApiBase(effectiveModel);
+    contentGeneratorConfig.openaiApiBase =
+      openaiApiBase || detectedApiBase || 'https://api.openai.com/v1';
+
+    contentGeneratorConfig.openaiModel = effectiveModel;
     contentGeneratorConfig.vertexai = false;
 
     return contentGeneratorConfig;
+  }
+
+  // 自动检测：如果用户指定了OpenAI兼容模型但没有明确设置认证类型，自动启用OpenAI兼容模式
+  if (!authType && openaiApiKey && effectiveModel) {
+    const detectedApiBase = detectModelApiBase(effectiveModel);
+    if (detectedApiBase) {
+      contentGeneratorConfig.authType = AuthType.USE_OPENAI_COMPATIBLE;
+      contentGeneratorConfig.apiKey = openaiApiKey;
+      contentGeneratorConfig.openaiApiBase = openaiApiBase || detectedApiBase;
+      contentGeneratorConfig.openaiModel = effectiveModel;
+      contentGeneratorConfig.vertexai = false;
+
+      return contentGeneratorConfig;
+    }
   }
 
   return contentGeneratorConfig;
@@ -172,7 +235,9 @@ export async function createContentGenerator(
       throw new Error('OpenAI API key is required for OpenAI-compatible APIs');
     }
     if (!config.openaiApiBase) {
-      throw new Error('OpenAI API base URL is required for OpenAI-compatible APIs');
+      throw new Error(
+        'OpenAI API base URL is required for OpenAI-compatible APIs',
+      );
     }
     if (!config.openaiModel) {
       throw new Error('OpenAI model is required for OpenAI-compatible APIs');

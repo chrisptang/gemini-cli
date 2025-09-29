@@ -1,4 +1,11 @@
 #!/usr/bin/env node
+/* global console, process */
+
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 /**
  * Test script to validate function call handling in OpenAI content generator
@@ -12,27 +19,31 @@ const mockResponse = {
   object: 'chat.completion',
   created: Date.now(),
   model: 'gpt-3.5-turbo',
-  choices: [{
-    index: 0,
-    message: {
-      role: 'assistant',
-      content: null,
-      tool_calls: [{
-        id: 'call_test123',
-        type: 'function',
-        function: {
-          name: 'get_weather',
-          arguments: '{"city": "New York", "units": "celsius"}'
-        }
-      }]
+  choices: [
+    {
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_test123',
+            type: 'function',
+            function: {
+              name: 'get_weather',
+              arguments: '{"city": "New York", "units": "celsius"}',
+            },
+          },
+        ],
+      },
+      finish_reason: 'tool_calls',
     },
-    finish_reason: 'tool_calls'
-  }],
+  ],
   usage: {
     prompt_tokens: 10,
     completion_tokens: 20,
-    total_tokens: 30
-  }
+    total_tokens: 30,
+  },
 };
 
 // Mock streaming chunks for testing
@@ -42,56 +53,68 @@ const mockStreamChunks = [
     object: 'chat.completion.chunk',
     created: Date.now(),
     model: 'gpt-3.5-turbo',
-    choices: [{
-      index: 0,
-      delta: {
-        role: 'assistant',
-        tool_calls: [{
-          index: 0,
-          id: 'call_test456',
-          type: 'function',
-          function: {
-            name: 'get_weather'
-          }
-        }]
-      }
-    }]
-  },
-  {
-    id: 'chatcmpl-test',
-    object: 'chat.completion.chunk',
-    created: Date.now(),
-    model: 'gpt-3.5-turbo',
-    choices: [{
-      index: 0,
-      delta: {
-        tool_calls: [{
-          index: 0,
-          function: {
-            arguments: '{"city":'
-          }
-        }]
-      }
-    }]
-  },
-  {
-    id: 'chatcmpl-test',
-    object: 'chat.completion.chunk',
-    created: Date.now(),
-    model: 'gpt-3.5-turbo',
-    choices: [{
-      index: 0,
-      delta: {
-        tool_calls: [{
-          index: 0,
-          function: {
-            arguments: ' "San Francisco"}'
-          }
-        }]
+    choices: [
+      {
+        index: 0,
+        delta: {
+          role: 'assistant',
+          tool_calls: [
+            {
+              index: 0,
+              id: 'call_test456',
+              type: 'function',
+              function: {
+                name: 'get_weather',
+              },
+            },
+          ],
+        },
       },
-      finish_reason: 'tool_calls'
-    }]
-  }
+    ],
+  },
+  {
+    id: 'chatcmpl-test',
+    object: 'chat.completion.chunk',
+    created: Date.now(),
+    model: 'gpt-3.5-turbo',
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            {
+              index: 0,
+              function: {
+                arguments: '{"city":',
+              },
+            },
+          ],
+        },
+      },
+    ],
+  },
+  {
+    id: 'chatcmpl-test',
+    object: 'chat.completion.chunk',
+    created: Date.now(),
+    model: 'gpt-3.5-turbo',
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            {
+              index: 0,
+              function: {
+                arguments: ' "San Francisco"}',
+              },
+            },
+          ],
+        },
+        finish_reason: 'tool_calls',
+      },
+    ],
+  },
 ];
 
 class TestOpenAIContentGenerator extends OpenAIContentGenerator {
@@ -113,41 +136,47 @@ class TestOpenAIContentGenerator extends OpenAIContentGenerator {
 
 async function testNonStreamingFunctionCalls() {
   console.log('🧪 Testing non-streaming function call conversion...');
-  
+
   const generator = new TestOpenAIContentGenerator();
-  
+
   const request = {
     model: 'test-model',
-    contents: [{
-      role: 'user',
-      parts: [{ text: 'Get weather for New York' }]
-    }],
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: 'Get weather for New York' }],
+      },
+    ],
     config: {
-      tools: [{
-        functionDeclarations: [{
-          name: 'get_weather',
-          description: 'Get weather for a city',
-          parametersJsonSchema: {
-            type: 'object',
-            properties: {
-              city: { type: 'string' },
-              units: { type: 'string' }
+      tools: [
+        {
+          functionDeclarations: [
+            {
+              name: 'get_weather',
+              description: 'Get weather for a city',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: {
+                  city: { type: 'string' },
+                  units: { type: 'string' },
+                },
+                required: ['city'],
+              },
             },
-            required: ['city']
-          }
-        }]
-      }]
-    }
+          ],
+        },
+      ],
+    },
   };
-  
+
   try {
     const result = await generator.generateContent(request, 'test-prompt');
-    
+
     console.log('Response structure:');
     console.log('- Has candidates:', !!result.candidates);
     console.log('- Has functionCalls:', !!result.functionCalls);
     console.log('- functionCalls count:', result.functionCalls?.length || 0);
-    
+
     if (result.functionCalls && result.functionCalls.length > 0) {
       const fc = result.functionCalls[0];
       console.log('- Function call details:');
@@ -168,42 +197,51 @@ async function testNonStreamingFunctionCalls() {
 
 async function testStreamingFunctionCalls() {
   console.log('\n🌊 Testing streaming function call conversion...');
-  
+
   const generator = new TestOpenAIContentGenerator();
-  
+
   const request = {
     model: 'test-model',
-    contents: [{
-      role: 'user',
-      parts: [{ text: 'Get weather for San Francisco' }]
-    }],
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: 'Get weather for San Francisco' }],
+      },
+    ],
     config: {
-      tools: [{
-        functionDeclarations: [{
-          name: 'get_weather',
-          description: 'Get weather for a city',
-          parametersJsonSchema: {
-            type: 'object',
-            properties: {
-              city: { type: 'string' }
+      tools: [
+        {
+          functionDeclarations: [
+            {
+              name: 'get_weather',
+              description: 'Get weather for a city',
+              parametersJsonSchema: {
+                type: 'object',
+                properties: {
+                  city: { type: 'string' },
+                },
+                required: ['city'],
+              },
             },
-            required: ['city']
-          }
-        }]
-      }]
-    }
+          ],
+        },
+      ],
+    },
   };
-  
+
   try {
-    const streamGenerator = await generator.generateContentStream(request, 'test-prompt-stream');
+    const streamGenerator = await generator.generateContentStream(
+      request,
+      'test-prompt-stream',
+    );
     const results = [];
-    
+
     for await (const result of streamGenerator) {
       results.push(result);
     }
-    
+
     console.log('Stream results count:', results.length);
-    
+
     let foundFunctionCall = false;
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
@@ -216,7 +254,7 @@ async function testStreamingFunctionCalls() {
         console.log('  - Args:', JSON.stringify(fc.args));
       }
     }
-    
+
     if (foundFunctionCall) {
       console.log('✅ Streaming function calls working correctly!');
       return true;
@@ -232,16 +270,16 @@ async function testStreamingFunctionCalls() {
 
 async function runTests() {
   console.log('🚀 Testing OpenAI Function Call Handling\n');
-  
+
   const results = [];
   results.push(testNonStreamingFunctionCalls());
   results.push(await testStreamingFunctionCalls());
-  
-  const passed = results.filter(r => r).length;
+
+  const passed = results.filter((r) => r).length;
   const total = results.length;
-  
+
   console.log(`\n📊 Test Results: ${passed}/${total} passed`);
-  
+
   if (passed === total) {
     console.log('🎉 All function call tests passed!');
     process.exit(0);
@@ -251,7 +289,7 @@ async function runTests() {
   }
 }
 
-runTests().catch(error => {
+runTests().catch((error) => {
   console.error('💥 Test suite failed:', error);
   process.exit(1);
 });

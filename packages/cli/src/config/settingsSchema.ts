@@ -529,7 +529,8 @@ export const SETTINGS_SCHEMA = {
         category: 'OpenAI',
         requiresRestart: true,
         default: undefined as string | undefined,
-        description: 'Base URL for OpenAI-compatible API endpoint (e.g., https://api.openai.com/v1)',
+        description:
+          'Base URL for OpenAI-compatible API endpoint (e.g., https://api.openai.com/v1)',
         showInDialog: true,
       },
       model: {
@@ -538,7 +539,8 @@ export const SETTINGS_SCHEMA = {
         category: 'OpenAI',
         requiresRestart: false,
         default: undefined as string | undefined,
-        description: 'Model name to use with OpenAI-compatible APIs (e.g., gpt-4, llama2)',
+        description:
+          'Model name to use with OpenAI-compatible APIs (e.g., gpt-4, llama2)',
         showInDialog: true,
       },
     },

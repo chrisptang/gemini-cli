@@ -64,6 +64,7 @@ export OPENAI_MODEL="llama2"  # or codellama, mistral, etc.
 ```
 
 Make sure Ollama is running:
+
 ```bash
 ollama serve
 ollama pull llama2  # Pull the model you want to use
@@ -97,18 +98,18 @@ export OPENAI_MODEL="mixtral-8x7b-32768"
 
 ### Environment Variables
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `OPENAI_API_KEY` | API key for authentication | `sk-...` or provider-specific key |
-| `OPENAI_API_BASE` | Base URL for API endpoint | `https://api.openai.com/v1` |
-| `OPENAI_MODEL` | Model name to use | `gpt-4`, `llama2`, `claude-3-sonnet` |
+| Variable          | Description                | Example                              |
+| ----------------- | -------------------------- | ------------------------------------ |
+| `OPENAI_API_KEY`  | API key for authentication | `sk-...` or provider-specific key    |
+| `OPENAI_API_BASE` | Base URL for API endpoint  | `https://api.openai.com/v1`          |
+| `OPENAI_MODEL`    | Model name to use          | `gpt-4`, `llama2`, `claude-3-sonnet` |
 
 ### CLI Arguments
 
-| Argument | Description |
-|----------|-------------|
+| Argument            | Description           |
+| ------------------- | --------------------- |
 | `--openai-api-base` | Override API base URL |
-| `--openai-model` | Override model name |
+| `--openai-model`    | Override model name   |
 
 ### Using .env Files
 
@@ -123,6 +124,7 @@ OPENAI_MODEL=gpt-4
 ## Features Support
 
 ### ✅ Fully Supported
+
 - Text generation and conversations
 - Streaming responses
 - Tool/function calling (if provider supports it)
@@ -132,6 +134,7 @@ OPENAI_MODEL=gpt-4
 - All Gemini CLI features (file analysis, code generation, etc.)
 
 ### ⚠️ Limited Support
+
 - Token counting (uses estimation)
 - Embeddings (not implemented, falls back to error)
 
@@ -148,6 +151,7 @@ OPENAI_MODEL=gpt-4
 ### Common Issues
 
 #### "API key not found"
+
 ```
 OPENAI_API_KEY environment variable not found.
 ```
@@ -155,6 +159,7 @@ OPENAI_API_KEY environment variable not found.
 **Solution:** Set the `OPENAI_API_KEY` environment variable.
 
 #### "API base URL not found"
+
 ```
 OPENAI_API_BASE environment variable not found.
 ```
@@ -162,6 +167,7 @@ OPENAI_API_BASE environment variable not found.
 **Solution:** Set the `OPENAI_API_BASE` environment variable to your provider's API endpoint.
 
 #### "Model not found"
+
 ```
 OPENAI_MODEL environment variable not found.
 ```
@@ -171,11 +177,13 @@ OPENAI_MODEL environment variable not found.
 #### Connection Errors
 
 **For local providers (Ollama, LocalAI):**
+
 - Ensure the service is running
 - Check the port number in `OPENAI_API_BASE`
 - Verify the model is loaded/available
 
 **For remote providers:**
+
 - Check your internet connection
 - Verify the API key is correct
 - Check if the provider's service is operational
@@ -183,6 +191,7 @@ OPENAI_MODEL environment variable not found.
 #### Function Calling Issues
 
 Some models or providers don't support OpenAI's function calling format. Gemini CLI will:
+
 1. Attempt to use tools normally
 2. Fall back to text-based tool descriptions if function calling fails
 3. Show appropriate error messages
@@ -236,6 +245,7 @@ gemini
 Use project-specific `.gemini/.env` files:
 
 **Project A (.gemini/.env):**
+
 ```env
 OPENAI_API_KEY=sk-openai-key
 OPENAI_API_BASE=https://api.openai.com/v1
@@ -243,6 +253,7 @@ OPENAI_MODEL=gpt-4
 ```
 
 **Project B (.gemini/.env):**
+
 ```env
 OPENAI_API_KEY=ollama
 OPENAI_API_BASE=http://localhost:11434/v1

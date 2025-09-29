@@ -25,16 +25,16 @@ vi.mock('../ui/commands/ideCommand.js', async () => {
     }),
   };
 });
-vi.mock('../ui/commands/restoreCommand.js', () => ({
-  restoreCommand: vi.fn(),
-}));
-
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { BuiltinCommandLoader } from './BuiltinCommandLoader.js';
 import type { Config } from '@google/gemini-cli-core';
 import { CommandKind } from '../ui/commands/types.js';
 
-import { restoreCommand } from '../ui/commands/restoreCommand.js';
+import { restoreCommand } from './restoreCommand.js';
+
+vi.mock('./restoreCommand.js', () => ({
+  restoreCommand: vi.fn(),
+}));
 
 vi.mock('../ui/commands/authCommand.js', () => ({ authCommand: {} }));
 vi.mock('../ui/commands/bugCommand.js', () => ({ bugCommand: {} }));
@@ -70,12 +70,6 @@ describe('BuiltinCommandLoader', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockConfig = { some: 'config' } as unknown as Config;
-
-    restoreCommandMock.mockReturnValue({
-      name: 'restore',
-      description: 'Restore command',
-      kind: CommandKind.BUILT_IN,
-    });
   });
 
   it('should correctly pass the config object to restore command factory', async () => {
@@ -88,6 +82,12 @@ describe('BuiltinCommandLoader', () => {
   });
 
   it('should filter out null command definitions returned by factories', async () => {
+    restoreCommandMock.mockReturnValue({
+      name: 'restore',
+      description: 'Restore command',
+      kind: CommandKind.BUILT_IN,
+    });
+
     // ideCommand is now a constant SlashCommand
     const loader = new BuiltinCommandLoader(mockConfig);
     const commands = await loader.loadCommands(new AbortController().signal);
@@ -95,6 +95,10 @@ describe('BuiltinCommandLoader', () => {
     // The 'ide' command should be present.
     const ideCmd = commands.find((c) => c.name === 'ide');
     expect(ideCmd).toBeDefined();
+
+    // The 'restore' command should be present.
+    const restoreCmd = commands.find((c) => c.name === 'restore');
+    expect(restoreCmd).toBeDefined();
 
     // Other commands should still be present.
     const aboutCmd = commands.find((c) => c.name === 'about');
@@ -110,6 +114,12 @@ describe('BuiltinCommandLoader', () => {
   });
 
   it('should return a list of all loaded commands', async () => {
+    restoreCommandMock.mockReturnValue({
+      name: 'restore',
+      description: 'Restore command',
+      kind: CommandKind.BUILT_IN,
+    });
+
     const loader = new BuiltinCommandLoader(mockConfig);
     const commands = await loader.loadCommands(new AbortController().signal);
 
@@ -122,5 +132,8 @@ describe('BuiltinCommandLoader', () => {
 
     const mcpCmd = commands.find((c) => c.name === 'mcp');
     expect(mcpCmd).toBeDefined();
+
+    const restoreCmd = commands.find((c) => c.name === 'restore');
+    expect(restoreCmd).toBeDefined();
   });
 });

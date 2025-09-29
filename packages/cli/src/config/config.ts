@@ -565,9 +565,15 @@ export async function loadCliConfig(
     ? DEFAULT_GEMINI_MODEL_AUTO
     : DEFAULT_GEMINI_MODEL;
   const resolvedModel: string =
+    // 1. 命令行参数优先 (--model 参数)
     argv.model ||
+    // 2. OPENAI_MODEL环境变量 (与--model具有相同功能)
+    process.env['OPENAI_MODEL'] ||
+    // 3. GEMINI_MODEL环境变量
     process.env['GEMINI_MODEL'] ||
+    // 4. 设置文件中的模型
     settings.model?.name ||
+    // 5. 默认模型
     defaultModel;
 
   const sandboxConfig = await loadSandboxConfig(settings, argv);
