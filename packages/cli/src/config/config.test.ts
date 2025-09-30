@@ -13,6 +13,7 @@ import {
   WriteFileTool,
   DEFAULT_GEMINI_MODEL,
   DEFAULT_GEMINI_MODEL_AUTO,
+  OutputFormat,
 } from '@google/gemini-cli-core';
 import { loadCliConfig, parseArguments, type CliArgs } from './config.js';
 import type { Settings } from './settings.js';
@@ -21,7 +22,9 @@ import * as ServerConfig from '@google/gemini-cli-core';
 import { isWorkspaceTrusted } from './trustedFolders.js';
 
 vi.mock('./trustedFolders.js', () => ({
-  isWorkspaceTrusted: vi.fn().mockReturnValue(true), // Default to trusted
+  isWorkspaceTrusted: vi
+    .fn()
+    .mockReturnValue({ isTrusted: true, source: 'file' }), // Default to trusted
 }));
 
 vi.mock('fs', async (importOriginal) => {
@@ -294,6 +297,34 @@ describe('parseArguments', () => {
 
     mockExit.mockRestore();
     mockConsoleError.mockRestore();
+  });
+
+  it('should support comma-separated values for --allowed-tools', async () => {
+    process.argv = [
+      'node',
+      'script.js',
+      '--allowed-tools',
+      'read_file,ShellTool(git status)',
+    ];
+    const argv = await parseArguments({} as Settings);
+    expect(argv.allowedTools).toEqual(['read_file', 'ShellTool(git status)']);
+  });
+
+  it('should support comma-separated values for --allowed-mcp-server-names', async () => {
+    process.argv = [
+      'node',
+      'script.js',
+      '--allowed-mcp-server-names',
+      'server1,server2',
+    ];
+    const argv = await parseArguments({} as Settings);
+    expect(argv.allowedMcpServerNames).toEqual(['server1', 'server2']);
+  });
+
+  it('should support comma-separated values for --extensions', async () => {
+    process.argv = ['node', 'script.js', '--extensions', 'ext1,ext2'];
+    const argv = await parseArguments({} as Settings);
+    expect(argv.extensions).toEqual(['ext1', 'ext2']);
   });
 });
 
@@ -1454,7 +1485,7 @@ describe('loadCliConfig model selection', () => {
       argv,
     );
 
-    expect(config.getModel()).toBe('gemini-2.5-pro');
+    expect(config.getModel()).toBe(DEFAULT_GEMINI_MODEL_AUTO);
   });
 
   it('always prefers model from argvs', async () => {
@@ -1772,7 +1803,7 @@ describe('loadCliConfig useRipgrep', () => {
       const argv = await parseArguments({} as Settings);
       const settings: Settings = {};
       const config = await loadCliConfig(settings, [], 'test-session', argv);
-      expect(config.getUseModelRouter()).toBe(false);
+      expect(config.getUseModelRouter()).toBe(true);
     });
 
     it('should be true when useModelRouter is set to true in settings', async () => {
@@ -1790,6 +1821,60 @@ describe('loadCliConfig useRipgrep', () => {
       const config = await loadCliConfig(settings, [], 'test-session', argv);
       expect(config.getUseModelRouter()).toBe(false);
     });
+  });
+});
+
+describe('screenReader configuration', () => {
+  const originalArgv = process.argv;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(os.homedir).mockReturnValue('/mock/home/user');
+    vi.stubEnv('GEMINI_API_KEY', 'test-api-key');
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('should use screenReader value from settings if CLI flag is not present (settings true)', async () => {
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = {
+      ui: { accessibility: { screenReader: true } },
+    };
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+    expect(config.getScreenReader()).toBe(true);
+  });
+
+  it('should use screenReader value from settings if CLI flag is not present (settings false)', async () => {
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = {
+      ui: { accessibility: { screenReader: false } },
+    };
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+    expect(config.getScreenReader()).toBe(false);
+  });
+
+  it('should prioritize --screen-reader CLI flag (true) over settings (false)', async () => {
+    process.argv = ['node', 'script.js', '--screen-reader'];
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = {
+      ui: { accessibility: { screenReader: false } },
+    };
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+    expect(config.getScreenReader()).toBe(true);
+  });
+
+  it('should be false by default when no flag or setting is present', async () => {
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = {};
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+    expect(config.getScreenReader()).toBe(false);
   });
 });
 
@@ -1902,6 +1987,37 @@ describe('loadCliConfig interactive', () => {
     const config = await loadCliConfig({}, [], 'test-session', argv);
     expect(config.isInteractive()).toBe(false);
   });
+
+  it('should not be interactive if positional prompt words are provided with other flags', async () => {
+    process.stdin.isTTY = true;
+    process.argv = ['node', 'script.js', '--model', 'gemini-1.5-pro', 'Hello'];
+    const argv = await parseArguments({} as Settings);
+    const config = await loadCliConfig({}, [], 'test-session', argv);
+    expect(config.isInteractive()).toBe(false);
+  });
+
+  it('should not be interactive if positional prompt words are provided with multiple flags', async () => {
+    process.stdin.isTTY = true;
+    process.argv = [
+      'node',
+      'script.js',
+      '--model',
+      'gemini-1.5-pro',
+      '--sandbox',
+      'Hello world',
+    ];
+    const argv = await parseArguments({} as Settings);
+    const config = await loadCliConfig({}, [], 'test-session', argv);
+    expect(config.isInteractive()).toBe(false);
+  });
+
+  it('should be interactive if no positional prompt words are provided with flags', async () => {
+    process.stdin.isTTY = true;
+    process.argv = ['node', 'script.js', '--model', 'gemini-1.5-pro'];
+    const argv = await parseArguments({} as Settings);
+    const config = await loadCliConfig({}, [], 'test-session', argv);
+    expect(config.isInteractive()).toBe(true);
+  });
 });
 
 describe('loadCliConfig approval mode', () => {
@@ -1984,7 +2100,10 @@ describe('loadCliConfig approval mode', () => {
   // --- Untrusted Folder Scenarios ---
   describe('when folder is NOT trusted', () => {
     beforeEach(() => {
-      vi.mocked(isWorkspaceTrusted).mockReturnValue(false);
+      vi.mocked(isWorkspaceTrusted).mockReturnValue({
+        isTrusted: false,
+        source: 'file',
+      });
     });
 
     it('should override --approval-mode=yolo to DEFAULT', async () => {
@@ -2095,52 +2214,54 @@ describe('loadCliConfig fileFiltering', () => {
   );
 });
 
-describe('Output Format Configuration', () => {
-  const originalArgv = process.argv;
-
-  afterEach(() => {
-    process.argv = originalArgv;
-    vi.restoreAllMocks();
+describe('Output format', () => {
+  it('should default to TEXT', async () => {
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const config = await loadCliConfig({}, [], 'test-session', argv);
+    expect(config.getOutputFormat()).toBe(OutputFormat.TEXT);
   });
 
-  it('should default to text format when no setting or flag is provided', async () => {
+  it('should use the format from settings', async () => {
     process.argv = ['node', 'script.js'];
     const argv = await parseArguments({} as Settings);
     const config = await loadCliConfig(
-      {} as Settings,
+      { output: { format: OutputFormat.JSON } },
       [],
       'test-session',
       argv,
     );
-    expect(config.getOutputFormat()).toBe(ServerConfig.OutputFormat.TEXT);
+    expect(config.getOutputFormat()).toBe(OutputFormat.JSON);
   });
 
-  it('should use the format from settings when no flag is provided', async () => {
-    process.argv = ['node', 'script.js'];
-    const settings: Settings = { output: { format: 'json' } };
-    const argv = await parseArguments(settings);
-    const config = await loadCliConfig(settings, [], 'test-session', argv);
-    expect(config.getOutputFormat()).toBe(ServerConfig.OutputFormat.JSON);
-  });
-
-  it('should use the format from the flag when provided', async () => {
+  it('should prioritize the format from argv', async () => {
     process.argv = ['node', 'script.js', '--output-format', 'json'];
     const argv = await parseArguments({} as Settings);
     const config = await loadCliConfig(
-      {} as Settings,
+      { output: { format: OutputFormat.JSON } },
       [],
       'test-session',
       argv,
     );
-    expect(config.getOutputFormat()).toBe(ServerConfig.OutputFormat.JSON);
+    expect(config.getOutputFormat()).toBe(OutputFormat.JSON);
   });
 
-  it('should prioritize the flag over the setting', async () => {
-    process.argv = ['node', 'script.js', '--output-format', 'text'];
-    const settings: Settings = { output: { format: 'json' } };
-    const argv = await parseArguments(settings);
-    const config = await loadCliConfig(settings, [], 'test-session', argv);
-    expect(config.getOutputFormat()).toBe(ServerConfig.OutputFormat.TEXT);
+  it('should error on invalid --output-format argument', async () => {
+    process.argv = ['node', 'script.js', '--output-format', 'yaml'];
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+    const mockConsoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+    await expect(parseArguments({} as Settings)).rejects.toThrow(
+      'process.exit called',
+    );
+    expect(mockConsoleError).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid values:'),
+    );
+    mockExit.mockRestore();
+    mockConsoleError.mockRestore();
   });
 });
 
@@ -2196,109 +2317,145 @@ describe('parseArguments with positional prompt', () => {
   });
 });
 
-describe('Model Priority Logic', () => {
-  let originalEnv: NodeJS.ProcessEnv;
-
-  beforeEach(() => {
-    // 保存原始环境变量
-    originalEnv = { ...process.env };
-  });
-
-  afterEach(() => {
-    // 恢复原始环境变量
-    process.env = originalEnv;
-  });
-
-  it('should prioritize --model parameter over OPENAI_MODEL environment variable', async () => {
-    // 设置环境变量
-    process.env['OPENAI_MODEL'] = 'env-model';
-    process.env['GEMINI_MODEL'] = 'gemini-env-model';
-
-    // 模拟命令行参数
-    process.argv = ['node', 'script.js', '--model', 'cli-model'];
-
-    const settings: Settings = {
-      model: { name: 'settings-model' }
-    } as Settings;
-
-    const argv = await parseArguments(settings);
-    const config = await loadCliConfig(settings, [], 'test-session', argv);
-
-    // 命令行参数应该有最高优先级
-    expect(config.getModel()).toBe('cli-model');
-  });
-
-  it('should use OPENAI_MODEL when --model is not provided', async () => {
-    // 设置环境变量
-    process.env['OPENAI_MODEL'] = 'openai-env-model';
-    process.env['GEMINI_MODEL'] = 'gemini-env-model';
-
-    // 不提供命令行参数
+describe('Telemetry configuration via environment variables', () => {
+  it('should prioritize GEMINI_TELEMETRY_ENABLED over settings', async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_ENABLED', 'true');
     process.argv = ['node', 'script.js'];
-
-    const settings: Settings = {
-      model: { name: 'settings-model' }
-    } as Settings;
-
-    const argv = await parseArguments(settings);
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = { telemetry: { enabled: false } };
     const config = await loadCliConfig(settings, [], 'test-session', argv);
-
-    // OPENAI_MODEL 应该优先于 GEMINI_MODEL 和设置文件
-    expect(config.getModel()).toBe('openai-env-model');
+    expect(config.getTelemetryEnabled()).toBe(true);
   });
 
-  it('should use GEMINI_MODEL when --model and OPENAI_MODEL are not provided', async () => {
-    // 只设置 GEMINI_MODEL
-    delete process.env['OPENAI_MODEL'];
-    process.env['GEMINI_MODEL'] = 'gemini-env-model';
-
-    // 不提供命令行参数
+  it('should prioritize GEMINI_TELEMETRY_TARGET over settings', async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_TARGET', 'gcp');
     process.argv = ['node', 'script.js'];
-
-    const settings: Settings = {
-      model: { name: 'settings-model' }
-    } as Settings;
-
-    const argv = await parseArguments(settings);
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = { telemetry: { target: 'local' } };
     const config = await loadCliConfig(settings, [], 'test-session', argv);
-
-    // GEMINI_MODEL 应该优先于设置文件
-    expect(config.getModel()).toBe('gemini-env-model');
+    expect(config.getTelemetryTarget()).toBe('gcp');
   });
 
-  it('should use settings model when no command line or environment variables are provided', async () => {
-    // 清除环境变量
-    delete process.env['OPENAI_MODEL'];
-    delete process.env['GEMINI_MODEL'];
-
-    // 不提供命令行参数
+  it('should throw when GEMINI_TELEMETRY_TARGET is invalid', async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_TARGET', 'bogus');
     process.argv = ['node', 'script.js'];
-
-    const settings: Settings = {
-      model: { name: 'settings-model' }
-    } as Settings;
-
-    const argv = await parseArguments(settings);
-    const config = await loadCliConfig(settings, [], 'test-session', argv);
-
-    // 应该使用设置文件中的模型
-    expect(config.getModel()).toBe('settings-model');
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = { telemetry: { target: 'gcp' } };
+    await expect(
+      loadCliConfig(settings, [], 'test-session', argv),
+    ).rejects.toThrow(
+      /Invalid telemetry configuration: .*Invalid telemetry target/i,
+    );
+    vi.unstubAllEnvs();
   });
 
-  it('should use default model when no configuration is provided', async () => {
-    // 清除环境变量
-    delete process.env['OPENAI_MODEL'];
-    delete process.env['GEMINI_MODEL'];
-
-    // 不提供命令行参数
+  it('should prioritize GEMINI_TELEMETRY_OTLP_ENDPOINT over settings and default env var', async () => {
+    vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://default.env.com');
+    vi.stubEnv('GEMINI_TELEMETRY_OTLP_ENDPOINT', 'http://gemini.env.com');
     process.argv = ['node', 'script.js'];
-
-    const settings: Settings = {} as Settings;
-
-    const argv = await parseArguments(settings);
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = {
+      telemetry: { otlpEndpoint: 'http://settings.com' },
+    };
     const config = await loadCliConfig(settings, [], 'test-session', argv);
+    expect(config.getTelemetryOtlpEndpoint()).toBe('http://gemini.env.com');
+  });
 
-    // 应该使用默认模型
-    expect(config.getModel()).toBe(DEFAULT_GEMINI_MODEL);
+  it('should prioritize GEMINI_TELEMETRY_OTLP_PROTOCOL over settings', async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_OTLP_PROTOCOL', 'http');
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = { telemetry: { otlpProtocol: 'grpc' } };
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+    expect(config.getTelemetryOtlpProtocol()).toBe('http');
+  });
+
+  it('should prioritize GEMINI_TELEMETRY_LOG_PROMPTS over settings', async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_LOG_PROMPTS', 'false');
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = { telemetry: { logPrompts: true } };
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+    expect(config.getTelemetryLogPromptsEnabled()).toBe(false);
+  });
+
+  it('should prioritize GEMINI_TELEMETRY_OUTFILE over settings', async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_OUTFILE', '/gemini/env/telemetry.log');
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = {
+      telemetry: { outfile: '/settings/telemetry.log' },
+    };
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+    expect(config.getTelemetryOutfile()).toBe('/gemini/env/telemetry.log');
+  });
+
+  it('should prioritize GEMINI_TELEMETRY_USE_COLLECTOR over settings', async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_USE_COLLECTOR', 'true');
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = { telemetry: { useCollector: false } };
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+    expect(config.getTelemetryUseCollector()).toBe(true);
+  });
+
+  it('should use settings value when GEMINI_TELEMETRY_ENABLED is not set', async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_ENABLED', undefined);
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = { telemetry: { enabled: true } };
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+    expect(config.getTelemetryEnabled()).toBe(true);
+  });
+
+  it('should use settings value when GEMINI_TELEMETRY_TARGET is not set', async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_TARGET', undefined);
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const settings: Settings = { telemetry: { target: 'local' } };
+    const config = await loadCliConfig(settings, [], 'test-session', argv);
+    expect(config.getTelemetryTarget()).toBe('local');
+  });
+
+  it("should treat GEMINI_TELEMETRY_ENABLED='1' as true", async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_ENABLED', '1');
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const config = await loadCliConfig({}, [], 'test-session', argv);
+    expect(config.getTelemetryEnabled()).toBe(true);
+  });
+
+  it("should treat GEMINI_TELEMETRY_ENABLED='0' as false", async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_ENABLED', '0');
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const config = await loadCliConfig(
+      { telemetry: { enabled: true } },
+      [],
+      'test-session',
+      argv,
+    );
+    expect(config.getTelemetryEnabled()).toBe(false);
+  });
+
+  it("should treat GEMINI_TELEMETRY_LOG_PROMPTS='1' as true", async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_LOG_PROMPTS', '1');
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const config = await loadCliConfig({}, [], 'test-session', argv);
+    expect(config.getTelemetryLogPromptsEnabled()).toBe(true);
+  });
+
+  it("should treat GEMINI_TELEMETRY_LOG_PROMPTS='false' as false", async () => {
+    vi.stubEnv('GEMINI_TELEMETRY_LOG_PROMPTS', 'false');
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments({} as Settings);
+    const config = await loadCliConfig(
+      { telemetry: { logPrompts: true } },
+      [],
+      'test-session',
+      argv,
+    );
+    expect(config.getTelemetryLogPromptsEnabled()).toBe(false);
   });
 });

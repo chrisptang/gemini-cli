@@ -17,6 +17,7 @@
 # Dependency directory
 node_modules
 bower_components
+package-lock.json
 
 # Editors
 .idea
@@ -50,4 +51,8 @@ packages/vscode-ide-companion/*.vsix
 # GHA credentials
 gha-creds-*.json
 
+# Downloaded files
 packages/cli/download-*
+
+# Log files
+patch_output.log
